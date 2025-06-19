@@ -15,7 +15,7 @@ class Vars:
   
   LOG_CHANNEL = None
   UPDATE_CHANNEL = None
-  DB_URL = "mongodb+srv://narutouzumaki22551:narutouzumaki22551@cluster0.econe.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+  DB_URL = "mongodb+srv://Cluster0:OvORgxx3l6L71RnU@cluster0.5vlbn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
   
   PORT = 8080
   ADMINS = [1880221341, 1002160667730, 5543390445, 5164955785, 5891177226, 7827086839, 6975428639] # eg: [83528911,836289,9362891]
