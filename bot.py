@@ -4,10 +4,10 @@ from time import time
 from loguru import logger
 
 class Vars:
-  API_ID = 
-  API_HASH = ""
+  API_ID = "20373005"
+  API_HASH = "e9bfc473049cbaeff901ca6892d559c7"
   
-  BOT_TOKEN = ""
+  BOT_TOKEN = "8012002306:AAHjjsEjx0KJPflbSALKkQFT7WHrKYiUGYc"
   plugins = dict(
     root="TG",
     #include=["TG.users"]
@@ -18,7 +18,7 @@ class Vars:
   DB_URL = ""
   
   PORT = 8080
-  ADMINS = [1880221341, -1002160667730]
+  ADMINS = [1880221341, 1002160667730, 5543390445, 5164955785, 5891177226, 7827086839, 6975428639] # eg: [83528911,836289,9362891]
   
   IS_PRIVATE = True #True Or None  Bot is for admins only
   CONSTANT_DUMP_CHANNEL = 
