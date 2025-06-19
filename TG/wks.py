@@ -1,0 +1,239 @@
+from .storage import *
+from bot import Bot, Vars, logger
+
+from Tools.img2pdf import download_and_convert_images, convert_images_to_pdf, thumbnali_images, download_through_cloudscrapper
+from Tools.img2cbz import images_to_cbz
+
+import os
+import shutil
+
+from time import time
+from pyrogram.types import InputMediaDocument
+
+from Tools.db import uts, sync
+
+def clean(txt, length=-1):
+  txt = txt.replace("_", "").replace("&", "").replace(";", "")
+  txt = txt.replace("None", "").replace(":", "").replace("'", "")
+  txt = txt.replace("|", "").replace("*", "").replace("?", "")
+  txt = txt.replace(">", "").replace("<", "").replace("`", "")
+  txt = txt.replace("!", "").replace("@", "").replace("#", "")
+  txt = txt.replace("$", "").replace("%", "").replace("^", "")
+  txt = txt.replace("~", "").replace("+", "").replace("=", "")
+  txt = txt.replace("/", "").replace("\\", "").replace("\n", "")
+  if length != -1:
+    txt = txt[:length]
+  return txt
+
+
+async def send_manga_chapter(data, picturesList, user, sts, webs, user_id = None):
+  start_time = time()
+  main_dir = None
+  user_id = None
+  download_dir = None
+  compressed_dir = None
+  pdf_output_path = None
+  cbz_output_path = None
+  media_docs = []
+
+  user_id = user.from_user.id if user else user_id
+  
+  if not str(user_id) in uts:
+    uts[str(user_id)] = {}
+    sync(Vars.DB_NAME, 'uts')
+  
+  try:
+    picturesList = picturesList if picturesList else data['pictures_list']
+    
+    episode_number = str(get_episode_number(data['title']))
+    regex = uts[str(user_id)].get('setting', {}).get('regex', None)
+    
+    episode_number = episode_number.zfill(int(regex)) if regex else episode_number
+    file_name = uts[str(user_id)].get('setting', {}).get('file_name', "Chapter {episode_number} {manga_title}")
+    
+    flen = int(
+      uts[str(user_id)].get('setting', {}).get('file_name_len', 30)
+    )
+    
+    caption = uts[str(user_id)].get('setting', {}).get('caption', "<blockquote>{file_name}</blockquote>")
+    
+    manga_title = clean(data['manga_title'], flen)
+    
+    file_name = file_name.replace("{episode_number}", episode_number).replace("{manga_title}", manga_title).replace("{chapter_num}", episode_number)
+    caption = caption.replace("{file_name}", file_name).replace("{episode_number}", episode_number).replace("{manga_title}", manga_title).replace("{chapter_num}", episode_number)
+
+    main_dir = f"Process/{user_id}" if isinstance(user_id, int) else f"Process/Updates"
+    download_dir = f"{main_dir}/pictures/{data['manga_title']}/{data['title']}"
+    if os.path.exists(download_dir):
+      download_dir += f"_{os.urandom(4).hex()}"
+      if os.path.exists(download_dir):
+        download_dir += f"_{os.urandom(4).hex()}"
+        if os.path.exists(download_dir):
+          download_dir += f"_{os.urandom(4).hex()}"
+
+    compressed_dir = f"{main_dir}/compress/{data['title']}"
+    
+    banner1 = uts[str(user_id)].get('setting', {}).get("banner1", None)
+    banner2 = uts[str(user_id)].get('setting', {}).get("banner2", None)
+    
+    if banner1:
+      if banner1.startswith("http"):
+        if webs.bg:
+          picturesList[0] = banner1
+        else:
+          picturesList.insert(0, banner1)
+        
+    if banner2:
+      if banner2.startswith("http"):
+        picturesList.append(banner2)
+    
+    if webs.url == "https://weebcentral.com/":
+      downloads_list = await download_through_cloudscrapper(picturesList, download_dir)
+    else:
+      downloads_list = await asyncio.get_running_loop().run_in_executor(None, download_and_convert_images, picturesList, download_dir)
+    
+    try: await sts.edit("<code>Downloading.....</code>")
+    except: pass
+    
+    if banner1:
+      if not banner1.startswith("http"):
+        try:
+          banner1 = await Bot.download_media(banner1)
+          if webs.bg:
+            os.remove(downloads_list[0])
+            downloads_list[0] = banner1
+          else:
+            downloads_list.insert(0, banner1)
+        except:
+          await retry_on_flood(sts.edit)("<code>Error at Banner1</code>")
+          await asyncio.sleep(10)
+      
+    if banner2:
+      if not banner2.startswith("http"):
+        try:
+          banner2 = await Bot.download_media(banner2)
+          downloads_list.append(banner2)
+        except:
+          await retry_on_flood(sts.edit)("<code>Error at Banner2. Change Banner</code>")
+          await asyncio.sleep(10)
+    
+    thumb = uts[str(user_id)].get('setting', {}).get('thumb', None)
+    if thumb:
+      if thumb.startswith("http"):
+        thumb = await asyncio.get_running_loop().run_in_executor(None, thumbnali_images, thumb, download_dir)
+      else:
+        try: thumb = await Bot.download_media(thumb)
+        except: thumb = None
+    else:
+      thumb = None
+    
+    file_type = uts[str(user_id)].get('setting', {}).get('type', ['PDF', 'CBZ'])
+    
+    if "PDF" in file_type:
+      pdf_output_path = f"{main_dir}/{file_name}.pdf"
+      
+      test = await asyncio.get_running_loop().run_in_executor(None, convert_images_to_pdf, downloads_list, pdf_output_path, compressed_dir)
+      if test:
+        await retry_on_flood(Bot.send_message)(user_id, f"Error at Making Pdf:- {data['url']}: <code>{test}</code>")
+      else:
+        media_docs.append(
+          InputMediaDocument(pdf_output_path, caption=caption, thumb=thumb)
+        )
+    
+    if "CBZ" in file_type:
+      cbz_output_path = f"{main_dir}/{file_name}.cbz"
+      test = await asyncio.get_running_loop().run_in_executor(None, images_to_cbz, downloads_list, cbz_output_path)
+      if test:
+        await retry_on_flood(Bot.send_message)(
+          user_id, f"Error at Making Cbz:- {data['url']}: <code>{test}</code>")
+      else:
+        media_docs.append(
+          InputMediaDocument(cbz_output_path, caption=caption, thumb=thumb)
+        )
+
+    if len(media_docs) > 0:
+      if Vars.IS_PRIVATE:
+        if user:
+          chat_id = user.message.chat.id
+        else:
+          chat_id = user_id
+      else:
+        chat_id = user_id
+      doc = await retry_on_flood(Bot.send_media_group)(int(chat_id), media_docs)
+      dump = uts[str(user_id)].get('setting', {}).get('dump', None)
+      if Vars.CONSTANT_DUMP_CHANNEL:
+        try: 
+          await retry_on_flood(Bot.send_media_group)(CONSTANT_DUMP_CHANNEL, media_docs)
+        except:
+          try: await sts.edit("<code>Add Bot At Dump Channel OR Provide Vaild Dump Channel</code>")
+          except: pass
+          await asyncio.sleep(10)
+          
+      elif dump:
+        try: 
+          await retry_on_flood(Bot.send_media_group)(int(dump), media_docs)
+        except:
+          try: await sts.edit("<code>Add Bot At Dump Channel OR Provide Vaild Dump Channel</code>")
+          except: pass
+          await asyncio.sleep(10)
+      
+      if Vars.LOG_CHANNEL:
+        logs_msg = f"{caption}\n{data['url']}\n<code>User Id</code>: <code>{user_id}</code>[{user.from_user.mention() if user else 'None'}]\n<code>Time Taken: {time() - start_time}</code>"
+        media_docs[-1].caption = logs_msg
+        try: await retry_on_flood(Bot.send_media_group)(Vars.LOG_CHANNEL, media_docs)
+        except: pass
+
+  except Exception as e:
+    if Vars.IS_PRIVATE:
+      if user:
+        chat_id = user.message.chat.id
+      else:
+        chat_id = user_id
+    else:
+      chat_id = user_id
+    
+    logger.exception(f"Error processing task {data['url']}: {e}")
+    await retry_on_flood(Bot.send_message)(chat_id, f"Error processing task {data['url']}: {e}")
+
+  finally:
+    if pdf_output_path and os.path.exists(pdf_output_path):
+      os.remove(pdf_output_path)
+
+    if cbz_output_path and os.path.exists(cbz_output_path):
+      os.remove(cbz_output_path)
+
+    if download_dir and os.path.exists(download_dir):
+      shutil.rmtree(download_dir, ignore_errors=True)
+
+    if compressed_dir and os.path.exists(compressed_dir):
+      shutil.rmtree(compressed_dir, ignore_errors=True)
+
+    if main_dir and os.path.exists(main_dir):
+      shutil.rmtree(main_dir, ignore_errors=True)
+    
+    try: await sts.delete()
+    except: pass
+
+
+async def worker(worker_id: int = 1):
+  while True:
+    try:
+      datas, user_id = await queue.get(worker_id)
+      data, picturesList, user, sts, webs = datas
+      
+      logger.debug(f"Worker {worker_id} processing task {data['url']}")
+      
+      try: await sts.edit("<code>Processing...</code>")
+      except: pass
+      
+      await send_manga_chapter(data, picturesList, user, sts, webs=webs)
+
+    except Exception as err:
+      logger.exception(f"Worker {worker_id} encountered an error: {err}")
+    finally:
+      if user_id:
+        queue.release(user_id)
+      
+      logger.debug(f"Worker {worker_id} released task ")
+      
+      queue.task_done()
